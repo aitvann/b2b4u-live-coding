@@ -1,0 +1,6 @@
+[package]
+name = "b2b4u-live-coding"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
