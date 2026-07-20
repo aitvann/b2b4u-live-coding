@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+arc-swap = "1.9.2"
 dashmap = "6.2.1"
+rand = "0.10.2"
+thread_local = "1.1.10"
 tokio = "1.52.3"
