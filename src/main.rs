@@ -4,7 +4,7 @@ use arc_swap::ArcSwap;
 use dashmap::DashSet;
 use std::cell::Cell;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use thread_local::ThreadLocal;
 
 pub trait Strategy: Send + Sync {
@@ -40,7 +40,7 @@ impl Strategy for Random {
 
 pub struct Balancer<T> {
     nodes: ArcSwap<Vec<T>>,
-    strategy: RwLock<Box<dyn Strategy>>,
+    strategy: ArcSwap<Box<dyn Strategy>>,
     set: DashSet<T>,
 }
 
@@ -50,8 +50,8 @@ where
 {
     pub fn new<S: Strategy + 'static>(strategy: S) -> Self {
         Balancer {
-            nodes: ArcSwap::from(Arc::new(Vec::new())),
-            strategy: RwLock::new(Box::new(strategy)),
+            nodes: ArcSwap::from_pointee(vec![]),
+            strategy: ArcSwap::from_pointee(Box::new(strategy)),
             set: DashSet::new(),
         }
     }
@@ -84,12 +84,12 @@ where
         if nodes.is_empty() {
             return None;
         }
-        let idx = self.strategy.read().unwrap().next_index(nodes.len());
+        let idx = self.strategy.load().next_index(nodes.len());
         Some(nodes[idx].clone())
     }
 
     pub fn set_strategy<S: Strategy + 'static>(&self, strategy: S) {
-        *self.strategy.write().unwrap() = Box::new(strategy);
+        self.strategy.store(Arc::new(Box::new(strategy)));
     }
 }
 
