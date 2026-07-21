@@ -42,11 +42,7 @@ pub struct Balancer<T> {
     nodes: ArcSwap<Vec<T>>,
     strategy: RwLock<Box<dyn Strategy>>,
     set: DashSet<T>,
-    write_lock: Mutex<()>,
 }
-
-unsafe impl<T: Send + Sync> Send for Balancer<T> {}
-unsafe impl<T: Send + Sync> Sync for Balancer<T> {}
 
 impl<T> Balancer<T>
 where
@@ -57,25 +53,27 @@ where
             nodes: ArcSwap::from(Arc::new(Vec::new())),
             strategy: RwLock::new(Box::new(strategy)),
             set: DashSet::new(),
-            write_lock: Mutex::new(()),
         }
     }
 
     pub fn add(&self, node: T) {
         if self.set.insert(node.clone()) {
-            let _guard = self.write_lock.lock().unwrap();
-            let mut new_nodes = (**self.nodes.load()).clone();
-            new_nodes.push(node);
-            self.nodes.store(Arc::new(new_nodes));
+            self.nodes.rcu(|nodes| {
+                let mut new_nodes = nodes.as_ref().clone();
+                new_nodes.push(node.clone());
+                new_nodes
+            });
         }
     }
 
     pub fn remove(&self, node: T) -> bool {
         if self.set.remove(&node).is_some() {
-            let _guard = self.write_lock.lock().unwrap();
-            let mut new_nodes = (**self.nodes.load()).clone();
-            new_nodes.retain(|n| *n != node);
-            self.nodes.store(Arc::new(new_nodes));
+            self.nodes.rcu(|nodes| {
+                let mut new_nodes = nodes.as_ref().clone();
+                new_nodes.retain(|n| *n != node);
+                new_nodes
+            });
+
             return true;
         }
         false
@@ -181,14 +179,15 @@ mod tests {
 
     #[test]
     fn test_thread_safety() {
+        const SIZE: usize = 40000;
+
         let balancer = Arc::new(Balancer::new(RoundRobin::default()));
         let mut handles = vec![];
 
-        for i in 0..4 {
+        for i in 0..=SIZE {
             let b = balancer.clone();
             handles.push(std::thread::spawn(move || {
                 b.add(i);
-                b.add(i + 10);
             }));
         }
 
@@ -196,9 +195,13 @@ mod tests {
             h.join().unwrap();
         }
 
-        for _ in 0..20 {
-            assert!(balancer.next().is_some());
+        let mut max = 0;
+        for _ in 0..=SIZE {
+            let node = balancer.next().unwrap();
+            max = max.max(node);
         }
+
+        assert_eq!(max, SIZE);
     }
 
     #[test]
